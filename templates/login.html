@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FlowForge — Login</title>
+  <meta name="description" content="Sign in to FlowForge, your distributed workflow engine.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body style="display:block">
+<div class="login-page">
+  <div class="login-card">
+    <div class="login-logo">
+      <div class="logo-icon" style="width:52px;height:52px;font-size:26px;margin:0 auto 12px;background:linear-gradient(135deg,#6c63ff,#9b5de5);border-radius:14px;display:flex;align-items:center;justify-content:center;box-shadow:0 0 30px rgba(108,99,255,0.3)">⚡</div>
+      <h1>FlowForge</h1>
+      <p>Distributed Workflow Engine</p>
+    </div>
+
+    <div class="tab-switcher">
+      <button class="tab-btn active" id="tabLogin" onclick="switchTab('login')">Sign In</button>
+      <button class="tab-btn" id="tabRegister" onclick="switchTab('register')">Create Account</button>
+    </div>
+
+    <!-- Login Form -->
+    <form id="loginForm" onsubmit="handleLogin(event)">
+      <div class="form-group">
+        <label class="form-label">Username</label>
+        <input id="loginUsername" type="text" class="form-input" placeholder="your_username" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <input id="loginPassword" type="password" class="form-input" placeholder="••••••••" required>
+      </div>
+      <button type="submit" class="btn btn-primary w-full" id="loginBtn" style="justify-content:center;margin-top:8px">
+        Sign In to FlowForge
+      </button>
+      <p id="loginError" style="color:#ef4444;font-size:13px;margin-top:10px;text-align:center;display:none"></p>
+    </form>
+
+    <!-- Register Form -->
+    <form id="registerForm" style="display:none" onsubmit="handleRegister(event)">
+      <div class="form-group">
+        <label class="form-label">Username</label>
+        <input id="regUsername" type="text" class="form-input" placeholder="chirag_joshi" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Email</label>
+        <input id="regEmail" type="email" class="form-input" placeholder="you@example.com">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <input id="regPassword" type="password" class="form-input" placeholder="Min 8 characters" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Confirm Password</label>
+        <input id="regPassword2" type="password" class="form-input" placeholder="••••••••" required>
+      </div>
+      <button type="submit" class="btn btn-primary w-full" style="justify-content:center;margin-top:8px">
+        Create Account
+      </button>
+      <p id="regError" style="color:#ef4444;font-size:13px;margin-top:10px;text-align:center;display:none"></p>
+    </form>
+  </div>
+</div>
+
+<script>
+  // Redirect if already logged in
+  if (localStorage.getItem('ff_access')) window.location.href = '/';
+
+  function switchTab(tab) {
+    const isLogin = tab === 'login';
+    document.getElementById('loginForm').style.display = isLogin ? '' : 'none';
+    document.getElementById('registerForm').style.display = isLogin ? 'none' : '';
+    document.getElementById('tabLogin').classList.toggle('active', isLogin);
+    document.getElementById('tabRegister').classList.toggle('active', !isLogin);
+  }
+
+  async function handleLogin(e) {
+    e.preventDefault();
+    const btn = document.getElementById('loginBtn');
+    btn.textContent = 'Signing in...'; btn.disabled = true;
+
+    const res = await fetch('/api/auth/login/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: document.getElementById('loginUsername').value,
+        password: document.getElementById('loginPassword').value,
+      })
+    });
+
+    const data = await res.json();
+    if (res.ok) {
+      localStorage.setItem('ff_access', data.access);
+      localStorage.setItem('ff_refresh', data.refresh);
+      window.location.href = '/';
+    } else {
+      const errEl = document.getElementById('loginError');
+      errEl.textContent = data.detail || 'Invalid credentials';
+      errEl.style.display = 'block';
+      btn.textContent = 'Sign In to FlowForge'; btn.disabled = false;
+    }
+  }
+
+  async function handleRegister(e) {
+    e.preventDefault();
+    const p1 = document.getElementById('regPassword').value;
+    const p2 = document.getElementById('regPassword2').value;
+    const errEl = document.getElementById('regError');
+
+    if (p1 !== p2) {
+      errEl.textContent = 'Passwords do not match'; errEl.style.display = 'block'; return;
+    }
+
+    const res = await fetch('/api/auth/register/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: document.getElementById('regUsername').value,
+        email: document.getElementById('regEmail').value,
+        password: p1, password2: p2,
+      })
+    });
+
+    const data = await res.json();
+    if (res.ok) {
+      switchTab('login');
+      document.getElementById('loginUsername').value = document.getElementById('regUsername').value;
+      errEl.style.display = 'none';
+      alert('Account created! Please sign in.');
+    } else {
+      errEl.textContent = JSON.stringify(data).replace(/[{}"]/g, '');
+      errEl.style.display = 'block';
+    }
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,349 @@
+{% extends "base.html" %}
+{% block title %}Pipeline — FlowForge{% endblock %}
+
+{% block extra_css %}
+<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="flex-between" style="margin-bottom:24px">
+  <div>
+    <a href="/" style="color:var(--text-muted);font-size:13px;text-decoration:none">← Back to Dashboard</a>
+    <h1 class="page-title" id="dagTitle" style="margin-top:6px">Loading...</h1>
+    <p class="page-subtitle" id="dagDesc">—</p>
+  </div>
+  <div class="flex gap-8">
+    <button class="btn btn-secondary btn-sm" onclick="openModal('addTaskModal')">+ Add Task</button>
+    <button class="btn btn-primary" onclick="triggerRun()" id="runBtn">▶ Trigger Run</button>
+  </div>
+</div>
+
+<!-- DAG Info Row -->
+<div class="grid-3" style="margin-bottom:24px" id="dagInfoCards">
+  <div class="card">
+    <div class="text-muted text-sm">Schedule</div>
+    <div style="font-weight:700;margin-top:4px;font-family:monospace;color:var(--warning)" id="dagSchedule">—</div>
+  </div>
+  <div class="card">
+    <div class="text-muted text-sm">Total Tasks</div>
+    <div style="font-weight:700;font-size:24px;margin-top:4px" id="dagTaskCount">—</div>
+  </div>
+  <div class="card">
+    <div class="text-muted text-sm">DAG Valid</div>
+    <div style="font-weight:700;margin-top:4px" id="dagValid">Checking...</div>
+  </div>
+</div>
+
+<!-- Visual DAG Graph -->
+<div class="card" style="padding:16px;margin-bottom:24px">
+  <div class="flex-between" style="margin-bottom:12px">
+    <span style="font-weight:700">Pipeline Graph</span>
+    <span class="text-muted text-sm">Drag nodes to rearrange</span>
+  </div>
+  <div id="dag-graph"></div>
+</div>
+
+<!-- Tasks Table -->
+<div class="table-container" style="margin-bottom:24px">
+  <div class="table-header">
+    <span class="table-title">Tasks</span>
+  </div>
+  <div id="tasksList"></div>
+</div>
+
+<!-- Run History -->
+<div class="table-container">
+  <div class="table-header">
+    <span class="table-title">Run History</span>
+  </div>
+  <div id="runHistory"></div>
+</div>
+
+<!-- Add Task Modal -->
+<div class="modal-overlay" id="addTaskModal">
+  <div class="modal" style="width:560px">
+    <div class="modal-header">
+      <h3 class="modal-title">Add Task</h3>
+      <button class="modal-close" onclick="closeModal('addTaskModal')">×</button>
+    </div>
+    <form onsubmit="addTask(event)">
+      <div class="grid-2">
+        <div class="form-group">
+          <label class="form-label">Task Name *</label>
+          <input id="taskName" type="text" class="form-input" placeholder="fetch_data" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Task Type *</label>
+          <select id="taskType" class="form-select" onchange="updateTaskConfig()">
+            <option value="DUMMY">Dummy (Simulated)</option>
+            <option value="HTTP">HTTP Request</option>
+            <option value="PYTHON">Python Code</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Description</label>
+        <input id="taskDesc" type="text" class="form-input" placeholder="What does this task do?">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Task Config (JSON)</label>
+        <textarea id="taskConfig" class="form-textarea font-mono" style="min-height:80px">{"duration": 3}</textarea>
+        <div id="taskConfigHint" class="text-muted text-sm" style="margin-top:4px">DUMMY: {"duration": 3} — simulates work for 3 seconds</div>
+      </div>
+      <div class="grid-2">
+        <div class="form-group">
+          <label class="form-label">Max Retries</label>
+          <input id="taskRetries" type="number" class="form-input" value="1" min="0" max="10">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Timeout (seconds)</label>
+          <input id="taskTimeout" type="number" class="form-input" value="300">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('addTaskModal')">Cancel</button>
+        <button type="submit" class="btn btn-primary">Add Task</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Add Dependency Modal -->
+<div class="modal-overlay" id="depModal">
+  <div class="modal" style="width:440px">
+    <div class="modal-header">
+      <h3 class="modal-title">Add Dependency</h3>
+      <button class="modal-close" onclick="closeModal('depModal')">×</button>
+    </div>
+    <p class="text-secondary text-sm" style="margin-bottom:16px">
+      Select which task must complete <strong>before</strong> "<span id="depTaskName"></span>" can start.
+    </p>
+    <div class="form-group">
+      <label class="form-label">Depends On</label>
+      <select id="depSelect" class="form-select"></select>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('depModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveDependency()">Add Dependency</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const dagId = window.location.pathname.split('/')[2];
+let dagData = null;
+let network = null;
+
+const taskConfigHints = {
+  DUMMY: '{"duration": 3} — simulates work for N seconds',
+  HTTP: '{"url": "https://api.example.com/data", "method": "GET"}',
+  PYTHON: '{"code": "import time\\ntime.sleep(1)\\noutput = \'done\'"}'
+};
+const taskConfigDefaults = {
+  DUMMY: '{"duration": 3}',
+  HTTP: '{"url": "https://httpbin.org/get", "method": "GET"}',
+  PYTHON: '{"code": "output = \'Hello from FlowForge!\'"}'
+};
+
+function updateTaskConfig() {
+  const type = document.getElementById('taskType').value;
+  document.getElementById('taskConfig').value = taskConfigDefaults[type];
+  document.getElementById('taskConfigHint').textContent = taskConfigHints[type];
+}
+
+async function loadDag() {
+  const res = await apiFetch(`/dags/${dagId}/`);
+  if (!res || !res.ok) { showToast('Failed to load DAG', 'error'); return; }
+  dagData = await res.json();
+
+  document.getElementById('dagTitle').textContent = dagData.name;
+  document.getElementById('dagDesc').textContent = dagData.description || 'No description';
+  document.getElementById('dagSchedule').textContent = dagData.schedule || 'Manual trigger only';
+  document.getElementById('dagTaskCount').textContent = dagData.task_count;
+
+  renderGraph(dagData.tasks);
+  renderTasks(dagData.tasks);
+  loadRunHistory();
+  validateDag();
+}
+
+function renderGraph(tasks) {
+  const nodes = new vis.DataSet(tasks.map(t => ({
+    id: t.id,
+    label: t.name,
+    title: `${t.task_type}\n${t.description || ''}`,
+    color: {
+      background: '#16161f',
+      border: '#6c63ff',
+      highlight: { background: '#1e1e2a', border: '#8b85ff' }
+    },
+    font: { color: '#f1f0ff', size: 13 },
+    borderWidth: 2,
+    shape: 'box',
+    margin: 10,
+  })));
+
+  const edges = new vis.DataSet([]);
+  tasks.forEach(t => {
+    t.dependencies.forEach(dep => {
+      edges.add({ from: dep.depends_on, to: t.id, arrows: 'to',
+        color: { color: '#6c63ff', highlight: '#8b85ff' }, width: 2 });
+    });
+  });
+
+  const container = document.getElementById('dag-graph');
+  network = new vis.Network(container, { nodes, edges }, {
+    layout: { hierarchical: { direction: 'LR', sortMethod: 'directed', levelSeparation: 180, nodeSpacing: 80 } },
+    physics: false,
+    interaction: { hover: true, tooltipDelay: 200 },
+    edges: { smooth: { type: 'cubicBezier' } }
+  });
+}
+
+function renderTasks(tasks) {
+  const el = document.getElementById('tasksList');
+  if (!tasks.length) {
+    el.innerHTML = `<div class="empty-state" style="padding:32px">
+      <div class="empty-desc">No tasks yet. Add your first task above.</div>
+    </div>`;
+    return;
+  }
+  el.innerHTML = `<table>
+    <thead><tr><th>Task Name</th><th>Type</th><th>Dependencies</th><th>Retries</th><th>Actions</th></tr></thead>
+    <tbody>${tasks.map(t => `
+      <tr>
+        <td style="font-weight:600">${t.name}<div class="text-muted text-sm">${t.description || ''}</div></td>
+        <td><span class="badge ${t.task_type === 'DUMMY' ? 'badge-skipped' : t.task_type === 'HTTP' ? 'badge-running' : 'badge-success'}">${t.task_type}</span></td>
+        <td>${t.dependencies.map(d => `<span class="badge badge-pending" style="margin:2px">${d.depends_on_name}</span>`).join('') || '<span class="text-muted text-sm">None (root task)</span>'}</td>
+        <td class="font-mono">${t.max_retries}</td>
+        <td>
+          <button class="btn btn-sm btn-secondary" onclick="openDepModal('${t.id}', '${t.name}')">+ Dependency</button>
+        </td>
+      </tr>`).join('')}
+    </tbody></table>`;
+}
+
+async function loadRunHistory() {
+  const res = await apiFetch(`/runs/?dag=${dagId}`);
+  if (!res || !res.ok) return;
+  const data = await res.json();
+  const runs = (data.results || data).filter(r => r.dag === dagId);
+  const el = document.getElementById('runHistory');
+  if (!runs.length) {
+    el.innerHTML = `<div class="empty-state" style="padding:32px"><div class="empty-desc">No runs yet for this pipeline.</div></div>`;
+    return;
+  }
+  el.innerHTML = `<table>
+    <thead><tr><th>Run ID</th><th>Status</th><th>Progress</th><th>Duration</th><th>Triggered</th><th></th></tr></thead>
+    <tbody>${runs.slice(0, 10).map(r => `
+      <tr>
+        <td class="font-mono text-sm">${r.id.slice(0,8)}...</td>
+        <td>${statusBadge(r.status)}</td>
+        <td><div class="progress-bar" style="width:100px"><div class="progress-fill" style="width:${r.progress}%"></div></div></td>
+        <td class="font-mono text-sm">${formatDuration(r.duration_seconds)}</td>
+        <td class="text-muted text-sm">${formatDate(r.created_at)}</td>
+        <td><a href="/runs/${r.id}/" class="btn btn-sm btn-secondary">Monitor</a></td>
+      </tr>`).join('')}
+    </tbody></table>`;
+}
+
+async function validateDag() {
+  const res = await apiFetch(`/dags/${dagId}/validate/`);
+  const el = document.getElementById('dagValid');
+  if (res && res.ok) {
+    el.innerHTML = '<span class="badge badge-success">✓ Valid DAG</span>';
+  } else {
+    el.innerHTML = '<span class="badge badge-failed">⚠ Has Cycle!</span>';
+  }
+}
+
+async function addTask(e) {
+  e.preventDefault();
+  let config = {};
+  try { config = JSON.parse(document.getElementById('taskConfig').value); }
+  catch { showToast('Invalid JSON in task config', 'error'); return; }
+
+  const res = await apiFetch(`/dags/${dagId}/tasks/`, {
+    method: 'POST',
+    body: JSON.stringify({
+      name: document.getElementById('taskName').value,
+      description: document.getElementById('taskDesc').value,
+      task_type: document.getElementById('taskType').value,
+      task_config: config,
+      max_retries: parseInt(document.getElementById('taskRetries').value),
+      timeout_seconds: parseInt(document.getElementById('taskTimeout').value),
+    })
+  });
+
+  if (res && res.ok) {
+    closeModal('addTaskModal');
+    showToast('Task added!', 'success');
+    loadDag();
+  } else {
+    let err = {};
+    try { err = await res.json(); } catch (e) {}
+    // If it's a Django validation error dictionary, format it cleanly
+    let msg = 'Failed to add task';
+    if (err.name) {
+      msg = `Name error: ${err.name.join(' ')}`;
+    } else if (err.error) {
+      msg = err.error;
+    } else if (err.detail) {
+      msg = err.detail;
+    } else if (err.non_field_errors) {
+      msg = err.non_field_errors.join(' ');
+    } else if (typeof err === 'object') {
+      msg = Object.entries(err).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(' ') : v}`).join('; ');
+    }
+    showToast(msg || 'Failed to add task', 'error');
+  }
+}
+
+let currentDepTaskId = null;
+function openDepModal(taskId, taskName) {
+  currentDepTaskId = taskId;
+  document.getElementById('depTaskName').textContent = taskName;
+  const sel = document.getElementById('depSelect');
+  sel.innerHTML = dagData.tasks
+    .filter(t => t.id !== taskId)
+    .map(t => `<option value="${t.id}">${t.name}</option>`)
+    .join('');
+  openModal('depModal');
+}
+
+async function saveDependency() {
+  const dependsOnId = document.getElementById('depSelect').value;
+  const res = await apiFetch(`/dags/${dagId}/tasks/${currentDepTaskId}/add_dependency/`, {
+    method: 'POST',
+    body: JSON.stringify({ depends_on_id: dependsOnId })
+  });
+  if (res && res.ok) {
+    closeModal('depModal');
+    showToast('Dependency added!', 'success');
+    loadDag();
+  } else {
+    const err = res ? await res.json() : {};
+    showToast(err.error || 'Failed to add dependency', 'error');
+  }
+}
+
+async function triggerRun() {
+  const btn = document.getElementById('runBtn');
+  btn.textContent = '⏳ Starting...'; btn.disabled = true;
+  const res = await apiFetch(`/runs/trigger/${dagId}/`, { method: 'POST', body: '{}' });
+  btn.textContent = '▶ Trigger Run'; btn.disabled = false;
+  if (res && res.ok) {
+    const run = await res.json();
+    showToast('Pipeline started!', 'success');
+    setTimeout(() => window.location.href = `/runs/${run.id}/`, 700);
+  } else {
+    const err = res ? await res.json() : {};
+    showToast(err.error || 'Failed to start run', 'error');
+  }
+}
+
+loadDag();
+</script>
+{% endblock %}

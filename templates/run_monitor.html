@@ -1,0 +1,283 @@
+{% extends "base.html" %}
+{% block title %}Run Monitor — FlowForge{% endblock %}
+
+{% block extra_css %}
+<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="flex-between" style="margin-bottom:24px">
+  <div>
+    <a id="backLink" href="/" style="color:var(--text-muted);font-size:13px;text-decoration:none">← Back to Pipeline</a>
+    <div class="flex gap-12" style="margin-top:8px;align-items:center">
+      <h1 class="page-title" id="runTitle">Live Run Monitor</h1>
+      <div id="runStatusBadge"></div>
+    </div>
+    <p class="text-muted text-sm" id="runMeta">Connecting to live feed...</p>
+  </div>
+  <button class="btn btn-danger btn-sm" id="cancelBtn" onclick="cancelRun()" style="display:none">⏹ Cancel</button>
+</div>
+
+<!-- Progress & Stats -->
+<div class="grid-4" style="margin-bottom:24px">
+  <div class="stat-card">
+    <div class="stat-value" id="statProgress">0%</div>
+    <div class="stat-label">Overall Progress</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value" style="color:var(--success)" id="statDone">0</div>
+    <div class="stat-label">Completed</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value" style="color:var(--danger)" id="statFailed">0</div>
+    <div class="stat-label">Failed</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value" style="color:var(--info)" id="statElapsed">0s</div>
+    <div class="stat-label">Elapsed</div>
+  </div>
+</div>
+
+<!-- Live DAG Graph -->
+<div class="card" style="padding:16px;margin-bottom:24px">
+  <div class="flex-between" style="margin-bottom:12px">
+    <span style="font-weight:700">Live Pipeline Graph</span>
+    <div class="flex gap-12 text-sm text-muted">
+      <span>⚪ Pending</span>
+      <span style="color:var(--info)">🔵 Running</span>
+      <span style="color:var(--success)">🟢 Success</span>
+      <span style="color:var(--danger)">🔴 Failed</span>
+      <span style="color:var(--skipped)">⬜ Skipped</span>
+    </div>
+  </div>
+  <div id="dag-graph"></div>
+</div>
+
+<!-- Task Runs Table + Live Logs -->
+<div class="grid-2" style="gap:20px">
+  <div class="table-container">
+    <div class="table-header"><span class="table-title">Task Status</span></div>
+    <div id="taskRunsList"></div>
+  </div>
+
+  <div>
+    <div class="flex-between" style="margin-bottom:8px">
+      <span style="font-weight:700;font-size:15px">Live Logs</span>
+      <span class="text-muted text-sm" id="wsStatus">🔴 Disconnected</span>
+    </div>
+    <div class="log-feed" id="logFeed">
+      <div class="log-line"><span class="log-time">--:--:--</span><span class="log-level-INFO">Waiting for pipeline to start...</span></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const runId = window.location.pathname.split('/')[2];
+let runData = null;
+let network = null;
+let nodeColorMap = {};
+let ws = null;
+let startTime = null;
+let elapsedTimer = null;
+
+const STATUS_COLORS = {
+  PENDING:  { bg: '#1a1a2a', border: '#3a3a5a', font: '#6b7280' },
+  RUNNING:  { bg: '#1a1f3a', border: '#3b82f6', font: '#93c5fd' },
+  SUCCESS:  { bg: '#0f2a1a', border: '#22c55e', font: '#86efac' },
+  FAILED:   { bg: '#2a0f0f', border: '#ef4444', font: '#fca5a5' },
+  SKIPPED:  { bg: '#1a1a1a', border: '#4b5563', font: '#6b7280' },
+};
+
+async function loadRun() {
+  const res = await apiFetch(`/runs/${runId}/`);
+  if (!res || !res.ok) { showToast('Run not found', 'error'); return; }
+  runData = await res.json();
+
+  document.getElementById('runTitle').textContent = runData.dag_name;
+  document.getElementById('backLink').href = `/dags/${runData.dag}/`;
+  document.getElementById('runStatusBadge').innerHTML = statusBadge(runData.status);
+  document.getElementById('runMeta').textContent =
+    `Run ${runId.slice(0, 8)}... • Triggered by ${runData.triggered_by_username} • ${formatDate(runData.created_at)}`;
+
+  if (['RUNNING', 'PENDING'].includes(runData.status)) {
+    document.getElementById('cancelBtn').style.display = '';
+    startTime = new Date(runData.started_at || runData.created_at);
+    elapsedTimer = setInterval(updateElapsed, 1000);
+  }
+
+  // Filter task runs to only show the latest attempt per task
+  // This prevents vis.js crashes due to duplicate node IDs on task retries
+  const latestTaskRunsMap = {};
+  (runData.task_runs || []).forEach(tr => {
+    const existing = latestTaskRunsMap[tr.task];
+    if (!existing || tr.attempt_number > existing.attempt_number) {
+      latestTaskRunsMap[tr.task] = tr;
+    }
+  });
+  const filteredTaskRuns = Object.values(latestTaskRunsMap);
+
+  renderLiveGraph(filteredTaskRuns);
+  renderTaskRuns(filteredTaskRuns);
+  updateStats(runData);
+  connectWebSocket();
+}
+
+function renderLiveGraph(taskRuns) {
+  const nodes = new vis.DataSet(taskRuns.map(tr => {
+    const s = STATUS_COLORS[tr.status] || STATUS_COLORS.PENDING;
+    nodeColorMap[tr.task] = tr.id;
+    return {
+      id: tr.task,
+      label: tr.task_name,
+      color: { background: s.bg, border: s.border, highlight: { background: s.bg, border: s.border } },
+      font: { color: s.font, size: 13 },
+      borderWidth: 2, shape: 'box', margin: 10,
+    };
+  }));
+
+  // We need edges from the dag — fetch them
+  apiFetch(`/dags/${runData.dag}/`).then(async r => {
+    if (!r || !r.ok) return;
+    const dag = await r.json();
+    const edges = new vis.DataSet([]);
+    dag.tasks.forEach(t => {
+      t.dependencies.forEach(dep => {
+        edges.add({ from: dep.depends_on, to: t.id, arrows: 'to',
+          color: { color: '#3a3a5a' }, width: 2 });
+      });
+    });
+    const container = document.getElementById('dag-graph');
+    network = new vis.Network(container, { nodes, edges }, {
+      layout: { hierarchical: { direction: 'LR', sortMethod: 'directed', levelSeparation: 180, nodeSpacing: 80 } },
+      physics: false,
+    });
+  });
+}
+
+function updateNodeColor(taskId, status) {
+  if (!network) return;
+  const s = STATUS_COLORS[status] || STATUS_COLORS.PENDING;
+  network.body.data.nodes.update({
+    id: taskId,
+    color: { background: s.bg, border: s.border, highlight: { background: s.bg, border: s.border } },
+    font: { color: s.font, size: 13 },
+  });
+}
+
+function renderTaskRuns(taskRuns) {
+  const el = document.getElementById('taskRunsList');
+  el.innerHTML = `<table>
+    <thead><tr><th>Task</th><th>Status</th><th>Duration</th><th>Attempt</th></tr></thead>
+    <tbody id="taskRunsBody">${taskRuns.map(tr => `
+      <tr id="tr-${tr.task}">
+        <td style="font-weight:600">${tr.task_name}<div class="font-mono text-sm text-muted">${tr.task_type}</div></td>
+        <td id="trs-${tr.task}">${statusBadge(tr.status)}</td>
+        <td class="font-mono text-sm" id="trd-${tr.task}">${formatDuration(tr.duration_seconds)}</td>
+        <td class="text-muted" id="tra-${tr.task}">#${tr.attempt_number}</td>
+      </tr>`).join('')}
+    </tbody></table>`;
+}
+
+function updateTaskRow(taskId, status, duration, attempt) {
+  const statusEl = document.getElementById(`trs-${taskId}`);
+  if (statusEl) statusEl.innerHTML = statusBadge(status);
+  if (duration) {
+    const durEl = document.getElementById(`trd-${taskId}`);
+    if (durEl) durEl.textContent = formatDuration(duration);
+  }
+  if (attempt) {
+    const attEl = document.getElementById(`tra-${taskId}`);
+    if (attEl) attEl.textContent = `#${attempt}`;
+  }
+}
+
+function updateStats(run) {
+  const taskRuns = run.task_runs || [];
+  const total = taskRuns.length;
+  const done = taskRuns.filter(t => ['SUCCESS', 'FAILED', 'SKIPPED'].includes(t.status)).length;
+  const failed = taskRuns.filter(t => t.status === 'FAILED').length;
+  const progress = total ? Math.round((done / total) * 100) : 0;
+
+  document.getElementById('statProgress').textContent = `${progress}%`;
+  document.getElementById('statDone').textContent = done;
+  document.getElementById('statFailed').textContent = failed;
+}
+
+function updateElapsed() {
+  if (!startTime) return;
+  const secs = Math.round((Date.now() - startTime) / 1000);
+  document.getElementById('statElapsed').textContent = formatDuration(secs);
+}
+
+function addLog(message, level, taskName, time) {
+  const feed = document.getElementById('logFeed');
+  const line = document.createElement('div');
+  line.className = 'log-line';
+  const t = time ? new Date(time).toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit', second:'2-digit'}) : new Date().toLocaleTimeString();
+  line.innerHTML = `<span class="log-time">${t}</span>
+    ${taskName ? `<span style="color:var(--accent);font-weight:500">[${taskName}]</span>` : ''}
+    <span class="log-level-${level}">${message}</span>`;
+  feed.appendChild(line);
+  feed.scrollTop = feed.scrollHeight;
+}
+
+function connectWebSocket() {
+  const wsUrl = `ws://localhost:8000/ws/runs/${runId}/`;
+  ws = new WebSocket(wsUrl);
+  document.getElementById('wsStatus').textContent = '🟡 Connecting...';
+
+  ws.onopen = () => {
+    document.getElementById('wsStatus').textContent = '🟢 Live';
+    addLog('Connected to live run feed', 'SUCCESS');
+  };
+
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    const { event, data } = msg;
+
+    if (event === 'task_status') {
+      updateNodeColor(data.task_id, data.status);
+      updateTaskRow(data.task_id, data.status, data.duration, data.attempt_number);
+      addLog(`Status changed: ${data.status}${data.error ? ' — ' + data.error : ''}`, data.status === 'FAILED' ? 'ERROR' : 'INFO', data.task_name);
+    }
+
+    if (event === 'task_log') {
+      addLog(data.message, data.level, data.task_name, data.timestamp);
+    }
+
+    if (event === 'pipeline_status') {
+      document.getElementById('runStatusBadge').innerHTML = statusBadge(data.status);
+      addLog(`🏁 Pipeline ${data.status} in ${formatDuration(data.duration)}`, data.status === 'SUCCESS' ? 'SUCCESS' : 'ERROR');
+      clearInterval(elapsedTimer);
+      document.getElementById('cancelBtn').style.display = 'none';
+      if (ws) ws.close();
+      document.getElementById('wsStatus').textContent = '⚫ Completed';
+    }
+  };
+
+  ws.onclose = () => {
+    if (document.getElementById('wsStatus').textContent.includes('Live')) {
+      document.getElementById('wsStatus').textContent = '🔴 Disconnected';
+    }
+  };
+
+  ws.onerror = () => {
+    document.getElementById('wsStatus').textContent = '🔴 Error';
+    addLog('WebSocket connection error', 'ERROR');
+  };
+}
+
+async function cancelRun() {
+  const res = await apiFetch(`/runs/${runId}/cancel/`, { method: 'POST', body: '{}' });
+  if (res && res.ok) {
+    showToast('Run cancelled', 'info');
+    clearInterval(elapsedTimer);
+    document.getElementById('cancelBtn').style.display = 'none';
+  }
+}
+
+loadRun();
+</script>
+{% endblock %}

@@ -1,0 +1,278 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — FlowForge{% endblock %}
+{% block nav_dashboard %}active{% endblock %}
+
+{% block content %}
+<div class="page-header flex-between">
+  <div>
+    <h1 class="page-title">Dashboard</h1>
+    <p class="page-subtitle">All your pipelines in one place</p>
+  </div>
+  <div class="flex gap-8">
+    <button class="btn btn-secondary" onclick="openModal('aiModal')">
+      🤖 AI Generate
+    </button>
+    <button class="btn btn-primary" onclick="openModal('createDagModal')">
+      + New Pipeline
+    </button>
+  </div>
+</div>
+
+<!-- Stats -->
+<div class="grid-4 mt-16" id="statsGrid">
+  <div class="stat-card">
+    <div class="stat-value" id="statTotal">—</div>
+    <div class="stat-label">Total Pipelines</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value" style="color:var(--success)" id="statSuccess">—</div>
+    <div class="stat-label">Successful Runs</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value" style="color:var(--danger)" id="statFailed">—</div>
+    <div class="stat-label">Failed Runs</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value" style="color:var(--info)" id="statRunning">—</div>
+    <div class="stat-label">Running Now</div>
+  </div>
+</div>
+
+<!-- Pipelines Table -->
+<div class="table-container mt-32">
+  <div class="table-header">
+    <span class="table-title">Your Pipelines</span>
+    <input type="text" class="form-input" style="width:220px;padding:7px 12px" placeholder="🔍 Search..." oninput="filterDags(this.value)">
+  </div>
+  <div id="dagList">
+    <div class="flex-center" style="padding:60px">
+      <div class="spinner"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Recent Runs -->
+<div class="table-container mt-24">
+  <div class="table-header">
+    <span class="table-title">Recent Runs</span>
+  </div>
+  <div id="runsList">
+    <div class="flex-center" style="padding:40px"><div class="spinner"></div></div>
+  </div>
+</div>
+
+<!-- Create DAG Modal -->
+<div class="modal-overlay" id="createDagModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 class="modal-title">Create New Pipeline</h3>
+      <button class="modal-close" onclick="closeModal('createDagModal')">×</button>
+    </div>
+    <form onsubmit="createDag(event)">
+      <div class="form-group">
+        <label class="form-label">Pipeline Name *</label>
+        <input id="dagName" type="text" class="form-input" placeholder="e.g. etl_daily_report" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Description</label>
+        <textarea id="dagDesc" class="form-textarea" placeholder="What does this pipeline do?"></textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Schedule (Cron)</label>
+        <input id="dagSchedule" type="text" class="form-input" placeholder='e.g. "0 9 * * *" for daily at 9am (optional)'>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('createDagModal')">Cancel</button>
+        <button type="submit" class="btn btn-primary">Create Pipeline</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- AI Generate Modal -->
+<div class="modal-overlay" id="aiModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 class="modal-title">🤖 AI Pipeline Generator</h3>
+      <button class="modal-close" onclick="closeModal('aiModal')">×</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Pipeline Name *</label>
+      <input id="aiDagName" type="text" class="form-input" placeholder="e.g. weather_etl">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Describe your pipeline in plain English *</label>
+      <textarea id="aiPrompt" class="form-textarea" style="min-height:120px"
+        placeholder='e.g. "Fetch weather data from an API, clean and validate it, run analysis to find temperature trends, then generate a PDF report and email it to the team"'></textarea>
+    </div>
+    <div id="aiStatus" style="display:none;padding:12px;background:var(--accent-glow);border-radius:8px;font-size:13px;color:var(--accent-light)">
+      🤖 AI is generating your pipeline...
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('aiModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="generateAI()">✨ Generate Pipeline</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let allDags = [];
+
+async function loadDashboard() {
+  const [dagsRes, runsRes] = await Promise.all([
+    apiFetch('/dags/'),
+    apiFetch('/runs/')
+  ]);
+
+  if (!dagsRes || !runsRes) return;
+
+  const dags = await dagsRes.json();
+  const runs = await runsRes.json();
+
+  allDags = dags.results || dags;
+  renderDags(allDags);
+  renderRuns(runs.results || runs);
+
+  // Stats
+  document.getElementById('statTotal').textContent = allDags.length;
+  const allRuns = runs.results || runs;
+  document.getElementById('statSuccess').textContent = allRuns.filter(r => r.status === 'SUCCESS').length;
+  document.getElementById('statFailed').textContent = allRuns.filter(r => r.status === 'FAILED').length;
+  document.getElementById('statRunning').textContent = allRuns.filter(r => r.status === 'RUNNING').length;
+}
+
+function renderDags(dags) {
+  const el = document.getElementById('dagList');
+  if (!dags.length) {
+    el.innerHTML = `<div class="empty-state">
+      <div class="empty-icon">🔀</div>
+      <div class="empty-title">No pipelines yet</div>
+      <div class="empty-desc">Create your first pipeline or use AI to generate one</div>
+    </div>`;
+    return;
+  }
+  el.innerHTML = `<table>
+    <thead><tr>
+      <th>Pipeline</th><th>Tasks</th><th>Schedule</th><th>Status</th><th>Actions</th>
+    </tr></thead>
+    <tbody>${dags.map(d => `
+      <tr>
+        <td>
+          <a href="/dags/${d.id}/" style="color:var(--accent-light);font-weight:600;text-decoration:none">${d.name}</a>
+          <div class="text-muted text-sm">${d.description || 'No description'}</div>
+        </td>
+        <td><span style="font-weight:700">${d.task_count}</span> <span class="text-muted">tasks</span></td>
+        <td><code class="font-mono text-sm" style="color:var(--warning)">${d.schedule || '—'}</code></td>
+        <td>${d.is_active ? '<span class="badge badge-success">Active</span>' : '<span class="badge badge-skipped">Inactive</span>'}</td>
+        <td>
+          <div class="flex gap-8">
+            <button class="btn btn-sm btn-primary" onclick="triggerRun('${d.id}', '${d.name}')">▶ Run</button>
+            <a href="/dags/${d.id}/" class="btn btn-sm btn-secondary">View</a>
+          </div>
+        </td>
+      </tr>`).join('')}
+    </tbody></table>`;
+}
+
+function renderRuns(runs) {
+  const el = document.getElementById('runsList');
+  if (!runs.length) {
+    el.innerHTML = `<div class="empty-state" style="padding:32px">
+      <div class="empty-desc">No runs yet. Trigger a pipeline to see results here.</div>
+    </div>`;
+    return;
+  }
+  el.innerHTML = `<table>
+    <thead><tr><th>Pipeline</th><th>Status</th><th>Progress</th><th>Duration</th><th>Triggered</th><th></th></tr></thead>
+    <tbody>${runs.slice(0, 15).map(r => `
+      <tr>
+        <td style="font-weight:600">${r.dag_name}</td>
+        <td>${statusBadge(r.status)}</td>
+        <td style="min-width:120px">
+          <div class="progress-bar"><div class="progress-fill" style="width:${r.progress}%"></div></div>
+          <div class="text-muted text-sm" style="margin-top:4px">${r.progress}%</div>
+        </td>
+        <td class="font-mono text-sm">${formatDuration(r.duration_seconds)}</td>
+        <td class="text-muted text-sm">${formatDate(r.created_at)}</td>
+        <td><a href="/runs/${r.id}/" class="btn btn-sm btn-secondary">Monitor</a></td>
+      </tr>`).join('')}
+    </tbody></table>`;
+}
+
+function filterDags(q) {
+  const filtered = q ? allDags.filter(d =>
+    d.name.toLowerCase().includes(q.toLowerCase()) ||
+    (d.description || '').toLowerCase().includes(q.toLowerCase())
+  ) : allDags;
+  renderDags(filtered);
+}
+
+async function createDag(e) {
+  e.preventDefault();
+  const res = await apiFetch('/dags/', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: document.getElementById('dagName').value,
+      description: document.getElementById('dagDesc').value,
+      schedule: document.getElementById('dagSchedule').value || null,
+    })
+  });
+  if (res && res.ok) {
+    const dag = await res.json();
+    closeModal('createDagModal');
+    showToast('Pipeline created!', 'success');
+    window.location.href = `/dags/${dag.id}/`;
+  } else {
+    showToast('Failed to create pipeline', 'error');
+  }
+}
+
+async function triggerRun(dagId, dagName) {
+  const res = await apiFetch(`/runs/trigger/${dagId}/`, { method: 'POST', body: '{}' });
+  if (res && res.ok) {
+    const run = await res.json();
+    showToast(`▶ ${dagName} started!`, 'success');
+    setTimeout(() => window.location.href = `/runs/${run.id}/`, 800);
+  } else {
+    const err = res ? await res.json() : {};
+    showToast(err.error || 'Failed to trigger run', 'error');
+  }
+}
+
+async function generateAI() {
+  const name = document.getElementById('aiDagName').value.trim();
+  const prompt = document.getElementById('aiPrompt').value.trim();
+  if (!name || !prompt) { showToast('Fill in both fields', 'error'); return; }
+
+  document.getElementById('aiStatus').style.display = 'block';
+  let res;
+  try {
+    res = await apiFetch('/dags/ai_generate/', {
+      method: 'POST',
+      body: JSON.stringify({ dag_name: name, prompt })
+    });
+  } catch (error) {
+    document.getElementById('aiStatus').style.display = 'none';
+    showToast('AI generation failed: Connection refused. Is the server running?', 'error');
+    return;
+  }
+
+  document.getElementById('aiStatus').style.display = 'none';
+  if (res && res.ok) {
+    const dag = await res.json();
+    closeModal('aiModal');
+    showToast(`🤖 AI generated "${dag.name}" with ${dag.tasks.length} tasks!`, 'success');
+    setTimeout(() => window.location.href = `/dags/${dag.id}/`, 1000);
+  } else {
+    let err = {};
+    try { err = await res.json(); } catch (e) {}
+    const msg = err.error || err.detail || 'AI generation failed. Check your OpenAI API key in .env';
+    showToast(msg, 'error');
+  }
+}
+
+loadDashboard();
+</script>
+{% endblock %}
