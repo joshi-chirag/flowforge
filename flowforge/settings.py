@@ -79,14 +79,6 @@ if DATABASE_URL:
             'PORT': url.port or '5432',
         }
     }
-elif os.getenv('RENDER'):
-    # Render build-time fallback to SQLite to prevent connection failures during collectstatic
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
-        }
-    }
 else:
     DATABASES = {
         'default': {
