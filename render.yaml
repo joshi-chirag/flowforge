@@ -1,10 +1,10 @@
-services:
-  # 1. Database (PostgreSQL)
-  - type: database
-    name: flowforge-db
+databases:
+  - name: flowforge-db
     databaseName: flowforge
     user: flowforge
     plan: free
+
+services:
 
   # 2. Broker & Cache (Redis)
   - type: redis
