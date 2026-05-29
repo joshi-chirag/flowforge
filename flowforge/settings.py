@@ -65,16 +65,31 @@ ASGI_APPLICATION = 'flowforge.asgi.application'
 WSGI_APPLICATION = 'flowforge.wsgi.application'
 
 # Database
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.getenv('POSTGRES_DB', 'flowforge'),
-        'USER': os.getenv('POSTGRES_USER', 'flowforge'),
-        'PASSWORD': os.getenv('POSTGRES_PASSWORD', 'flowforge123'),
-        'HOST': os.getenv('POSTGRES_HOST', 'db'),
-        'PORT': os.getenv('POSTGRES_PORT', '5432'),
+DATABASE_URL = os.getenv('DATABASE_URL')
+if DATABASE_URL:
+    import urllib.parse as urlparse
+    url = urlparse.urlparse(DATABASE_URL)
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': url.path[1:],
+            'USER': url.username,
+            'PASSWORD': url.password,
+            'HOST': url.hostname,
+            'PORT': url.port or '5432',
+        }
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.getenv('POSTGRES_DB', 'flowforge'),
+            'USER': os.getenv('POSTGRES_USER', 'flowforge'),
+            'PASSWORD': os.getenv('POSTGRES_PASSWORD', 'flowforge123'),
+            'HOST': os.getenv('POSTGRES_HOST', 'db'),
+            'PORT': os.getenv('POSTGRES_PORT', '5432'),
+        }
+    }
 
 # Redis / Channel Layers
 REDIS_URL = os.getenv('REDIS_URL', 'redis://redis:6379/0')
