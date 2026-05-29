@@ -7,7 +7,7 @@ databases:
 services:
 
   # 2. Broker & Cache (Redis)
-  - type: redis
+  - type: keyvalue
     name: flowforge-redis
     plan: free
     ipAllowList: [] # Access isolated only to Render services
@@ -32,15 +32,18 @@ services:
           name: flowforge-db
           property: connectionString
       - key: REDIS_URL
-        fromRedis:
+        fromService:
+          type: keyvalue
           name: flowforge-redis
           property: connectionString
       - key: CELERY_BROKER_URL
-        fromRedis:
+        fromService:
+          type: keyvalue
           name: flowforge-redis
           property: connectionString
       - key: CELERY_RESULT_BACKEND
-        fromRedis:
+        fromService:
+          type: keyvalue
           name: flowforge-redis
           property: connectionString
       - key: OPENAI_API_KEY
@@ -63,15 +66,18 @@ services:
           name: flowforge-db
           property: connectionString
       - key: REDIS_URL
-        fromRedis:
+        fromService:
+          type: keyvalue
           name: flowforge-redis
           property: connectionString
       - key: CELERY_BROKER_URL
-        fromRedis:
+        fromService:
+          type: keyvalue
           name: flowforge-redis
           property: connectionString
       - key: CELERY_RESULT_BACKEND
-        fromRedis:
+        fromService:
+          type: keyvalue
           name: flowforge-redis
           property: connectionString
 
@@ -92,14 +98,17 @@ services:
           name: flowforge-db
           property: connectionString
       - key: REDIS_URL
-        fromRedis:
+        fromService:
+          type: keyvalue
           name: flowforge-redis
           property: connectionString
       - key: CELERY_BROKER_URL
-        fromRedis:
+        fromService:
+          type: keyvalue
           name: flowforge-redis
           property: connectionString
       - key: CELERY_RESULT_BACKEND
-        fromRedis:
+        fromService:
+          type: keyvalue
           name: flowforge-redis
           property: connectionString
