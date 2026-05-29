@@ -1,0 +1,123 @@
+# ⚡ FlowForge — Distributed Workflow Engine
+
+FlowForge is a production-grade, distributed workflow orchestration engine designed to model, schedule, and execute complex pipelines of dependent tasks. Highly inspired by **Apache Airflow**, FlowForge uses a **Directed Acyclic Graph (DAG)** model to manage dependencies, executes workloads asynchronously using distributed **Celery** workers, and streams execution states in real-time to a **WebSocket-powered dashboard**.
+
+It also features an **AI-driven pipeline architect** powered by **OpenAI's GPT-4o-mini** to dynamically provision pipelines from plain English, supported by a rule-based mock generator fallback.
+
+---
+
+## 🏗️ System Architecture
+
+FlowForge is built with a highly decoupled, multi-container architecture orchestrated via **Docker Compose**:
+
+```
+                 ┌────────────────────────┐
+                 │  Browser Dashboard UI  │
+                 └──────────┬──▲──────────┘
+                HTTP/JWT API│  │WebSocket Updates
+                            ▼  │
+                 ┌────────────────────────┐
+                 │ Daphne ASGI Web Server ◄────────► OpenAI API
+                 └────┬──────────────┬────┘
+                      │              │
+             Write/Read│              │Publish/Subscribe
+                      ▼              ▼
+               ┌──────────────┐    ┌───────────┐
+               │ PostgreSQL   │    │   Redis   │
+               │  Database    │    │  Broker   │
+               └──────▲───────┘    └─────┬─────┘
+                      │                  │
+                      │Write Status &    │Fetch Task
+                      │Console Logs      ▼
+                      │            ┌───────────┐
+                      └────────────┤  Celery   │
+                                   │  Worker   │
+                                   └───────────┘
+```
+
+* **Daphne (Django)**: ASGI server handling secure authentication, CRUD, and WebSockets.
+* **PostgreSQL**: Hard-drive persistent storage for pipelines, schedules, and history.
+* **Redis**: In-memory message broker (for Celery queues) and channel layers (for live WebSockets).
+* **Celery Worker**: Isolated background worker running tasks (Dummy simulations, Python scripts, or HTTP requests) in parallel, handling retries and skip-propagations.
+
+---
+
+## ✨ Features
+
+- **🔐 Secure JWT Authentication**: Robust registration and login routes with automatic token refreshing.
+- **📊 Real-time Monitoring Graph**: Visual task dependency network drawn using **vis.js** that updates nodes dynamically (⚪ gray -> 🔵 blue -> 🟢 green -> 🔴 red) as they progress in the background.
+- **🗣️ Live Streaming Console**: Live execution logs streamed from distributed workers to the browser via WebSockets with under 5ms latency.
+- **🤖 NLP AI Generator**: Type your pipeline in plain English (e.g. *"fetch metrics from API, clean with python, compile report"*) and let OpenAI GPT-4o-mini build your tasks and links instantly.
+- **🔄 Advanced Retry Failovers**: Automatic retries with exponential backoffs and automatic downstream skip propagation when parent tasks fail.
+- **🔀 Topological Sorting**: Powered by **Kahn's Algorithm** to detect cycle deadlocks and structure correct execution steps.
+
+---
+
+## 🛠️ Tech Stack
+
+* **Backend**: Django 5, Django REST Framework (DRF), Django Channels (ASGI WebSockets)
+* **Task Queues**: Celery, Redis Broker
+* **Databases**: PostgreSQL (Relational)
+* **Frontend**: HTML5, CSS3 Main Design System, Vanilla JS, vis.js Network Graph
+* **AI Engine**: OpenAI Python SDK, GPT-4o-mini completions
+* **Deployment**: Docker, Docker Compose
+
+---
+
+## 🚀 Local Installation & Quick Start
+
+### Prerequisites
+* [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed on Windows/Mac/Linux.
+
+### Setup Steps
+1. **Clone the Repository**:
+   ```bash
+   git clone https://github.com/your-username/flowforge.git
+   cd flowforge
+   ```
+2. **Configure Environment Variables**:
+   Create a `.env` file in the root directory:
+   ```env
+   DEBUG=True
+   SECRET_KEY=dev-django-insecure-key
+   ALLOWED_HOSTS=localhost,127.0.0.1
+   
+   # PostgreSQL
+   POSTGRES_DB=flowforge
+   POSTGRES_USER=flowforge
+   POSTGRES_PASSWORD=flowforge123
+   POSTGRES_HOST=db
+   POSTGRES_PORT=5432
+   
+   # Redis & Broker
+   REDIS_URL=redis://redis:6379/0
+   CELERY_BROKER_URL=redis://redis:6379/0
+   CELERY_RESULT_BACKEND=redis://redis:6379/0
+   
+   # OpenAI (Optional)
+   OPENAI_API_KEY=your-openai-api-key-here
+   ```
+3. **Boot Up Services**:
+   Start the 6 orchestrator containers in detached mode:
+   ```bash
+   docker compose up -d
+   ```
+4. **Create Database Migrations**:
+   Generate and apply tables for the Postgres container:
+   ```bash
+   docker compose exec web python manage.py makemigrations accounts dags runs
+   docker compose exec web python manage.py migrate
+   ```
+5. **Explore the Engine**:
+   * Open your browser and go to: **[http://localhost:8000/](http://localhost:8000/)**
+   * Register an account, log in, and trigger your first pipeline!
+   * Access background worker metrics at: **[http://localhost:5555/](http://localhost:5555/)** (Flower Console)
+   * View interactive OpenAPI Swagger docs at: **[http://localhost:8000/api/docs/](http://localhost:8000/api/docs/)**
+
+---
+
+## 🧮 How to Showcase (The Demo Guide)
+
+1. **AI Graph Provisioning**: Create a pipeline using **🤖 AI Generate**, showing how NLP queries translate instantly to database task graphs.
+2. **Cycle Deadlock Blocks**: Try creating a circular dependency between tasks, showing how the Kahn's algorithm cycle detection raises immediate warnings.
+3. **Live Failover Retries**: Add a task that raises a Python error, set retries to `3`, and watch the node turn **red 🔴**, increment its attempts `#1` -> `#2` -> `#3` in real-time, and recursively transition downstream tasks to **skipped ⬜** on final failure.
