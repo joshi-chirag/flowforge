@@ -1,5 +1,5 @@
 // ── AUTH HELPERS ────────────────────────────────
-const API = 'http://localhost:8000/api';
+const API = '/api';
 
 function getToken() { return localStorage.getItem('ff_access'); }
 function getRefresh() { return localStorage.getItem('ff_refresh'); }

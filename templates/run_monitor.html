@@ -224,7 +224,8 @@ function addLog(message, level, taskName, time) {
 }
 
 function connectWebSocket() {
-  const wsUrl = `ws://localhost:8000/ws/runs/${runId}/`;
+  const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${wsProto}//${window.location.host}/ws/runs/${runId}/`;
   ws = new WebSocket(wsUrl);
   document.getElementById('wsStatus').textContent = '🟡 Connecting...';
 
