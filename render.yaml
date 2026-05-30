@@ -47,3 +47,5 @@ services:
           property: connectionString
       - key: OPENAI_API_KEY
         sync: false # Set manually in the Render dashboard
+      - key: GEMINI_API_KEY
+        sync: false # Set manually in the Render dashboard
