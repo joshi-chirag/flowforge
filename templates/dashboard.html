@@ -268,7 +268,16 @@ async function generateAI() {
   } else {
     let err = {};
     try { err = await res.json(); } catch (e) {}
-    const msg = err.error || err.detail || 'AI generation failed. Check your OpenAI API key in .env';
+    let msg = err.error || err.detail;
+    if (!msg && typeof err === 'object' && err !== null) {
+      const firstField = Object.keys(err)[0];
+      if (firstField && Array.isArray(err[firstField])) {
+        msg = `${firstField.replace('_', ' ')}: ${err[firstField][0]}`;
+      } else if (firstField && typeof err[firstField] === 'string') {
+        msg = `${firstField.replace('_', ' ')}: ${err[firstField]}`;
+      }
+    }
+    msg = msg || 'AI generation failed. Check your OpenAI API key in .env';
     showToast(msg, 'error');
   }
 }

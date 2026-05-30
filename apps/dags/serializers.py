@@ -96,3 +96,8 @@ class AIGenerateDAGSerializer(serializers.Serializer):
         help_text='Describe your pipeline in plain English. E.g. "Fetch weather data, clean it, analyze trends, then email a report"'
     )
     dag_name = serializers.CharField(max_length=255)
+
+    def validate_dag_name(self, value):
+        if DAG.objects.filter(name=value).exists():
+            raise serializers.ValidationError("A pipeline with this name already exists. Please choose a unique name.")
+        return value
