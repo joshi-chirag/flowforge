@@ -15,6 +15,14 @@ This report documents the end-to-end engineering journey, deep architectural ref
 
 ---
 
+## 📖 About the Project
+
+FlowForge was engineered to solve the operational complexities of running large-scale, automated workflow orchestrations (like Apache Airflow) on resource-constrained environments. While tools like Airflow are robust, they are notoriously heavy to host, manage, and configure for small-to-medium teams.
+
+FlowForge bridges this gap by providing an **ultra-lightweight, self-hostable ASGI-driven orchestration engine** that runs smoothly on standard low-memory platforms (such as Render's 512MB free tier). By consolidating task scheduling (Celery Beat), worker dispatch (Celery), and real-time streaming sockets (Daphne/Django Channels) into a unified codebase, it enables developers to prototype, manage, and monitor high-frequency pipeline steps without complex multi-instance provisioning or massive cloud bills.
+
+---
+
 ## 2. System Architecture
 
 FlowForge is constructed as a decoupled, multi-container system that isolates the web handling, database storage, message caching, and worker execution concerns:
