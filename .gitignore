@@ -20,6 +20,9 @@ staticfiles/
 *.log
 postgres_data/
 
+# Scratch / test files
+scratch/
+
 # OS-specific files
 .DS_Store
 Thumbs.db
