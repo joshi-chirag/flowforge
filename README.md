@@ -89,13 +89,13 @@ FlowForge is built with a highly decoupled, multi-container architecture orchest
    Create a `.env` file in the root directory:
    ```env
    DEBUG=True
-   SECRET_KEY=dev-django-insecure-key
+   SECRET_KEY=your-secret-key-here
    ALLOWED_HOSTS=localhost,127.0.0.1
    
    # PostgreSQL
    POSTGRES_DB=flowforge
    POSTGRES_USER=flowforge
-   POSTGRES_PASSWORD=flowforge123
+   POSTGRES_PASSWORD=your-postgres-password-here
    POSTGRES_HOST=db
    POSTGRES_PORT=5432
    

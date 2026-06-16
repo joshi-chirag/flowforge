@@ -6,7 +6,9 @@ load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-dev-key-change-in-production')
+SECRET_KEY = os.getenv('SECRET_KEY', '')
+if not SECRET_KEY and os.getenv('RENDER'):
+    raise ValueError('SECRET_KEY environment variable is required in production')
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
 if os.getenv('RENDER'):
     ALLOWED_HOSTS = ['*']
@@ -96,7 +98,7 @@ else:
             'ENGINE': 'django.db.backends.postgresql',
             'NAME': os.getenv('POSTGRES_DB', 'flowforge'),
             'USER': os.getenv('POSTGRES_USER', 'flowforge'),
-            'PASSWORD': os.getenv('POSTGRES_PASSWORD', 'flowforge123'),
+            'PASSWORD': os.getenv('POSTGRES_PASSWORD', ''),
             'HOST': os.getenv('POSTGRES_HOST', 'db'),
             'PORT': os.getenv('POSTGRES_PORT', '5432'),
         }
